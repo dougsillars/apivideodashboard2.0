@@ -1,0 +1,60 @@
+head 
+  link(rel='stylesheet', href='/dashboard.css')
+  link(rel='icon', href='/icon.ico', type='image/x-icon')
+  script(src='/socket.io.js')
+  script(src='/dashboarddemo.js')
+
+body
+
+  .container
+
+   .topRow
+      .getStarted(class = "getStarted")
+         | Test out your API
+      .action_environment
+          #sandboxDiv Sandbox
+            input(style='display:none' type="radio" name="envir" value='sandbox' id='sandbox' checked="checked" )
+          #productionDiv Production
+            
+            input(style='display:none' type="radio" name="envir" value='production' id='production' )        
+   .resultRow    
+    .resultsWrapper
+     p !{videoResponse}
+   .vodOrLiveRow  
+    .action__upload(id='action__upload')
+        
+          
+        form(id='upload',name='uploadForm',action='/' ,method = 'POST',  enctype="multipart/form-data")
+          input(id='vodsandbox',type='text', name = "vodsandbox", value="true",style='display:none')
+
+          label(for='file', class="uploadFile")          
+           .uploadFile__icon
+            img(draggable="false", width="50px", src="upload.png", alt="")
+           .uploadFile__content
+            span(style="font-size: 18px;") <b>Upload</b><br/><br/>
+            span(class='uploadFile__content__desc')  Drop a video here or <b>click to browse</b> for a file (max 100mb)
+           input(id='file',type='file', name="source", class="inputFile", style='display:none', onclick='thisFileUpload();')
+     
+    .action__live
+        form(name='livestreamForm',action='/' method = 'GET')
+          input(id='livetext',type='text', name = "live", value="true",style='display:none')
+          input(id='livesandbox',type='text', name = "livesandbox", value="true",style='display:none')
+          span(style="font-size: 18px;") <b>Livestream</b><br/><br/>
+          span(class='uploadFile__content__desc') Start live streaming from your webcam (Chrome and Firefox only). <br/><br/>
+          input(type="submit", class="liveButton" name="livestream", value ='Start' onclick='initiateLivestream();')
+        #live_disclaimer NOTE: Low fidelity 240x240 video. This is intended as a demo.
+
+  #liveTest
+  #Livestream
+    p 
+  #output_message(style='display:none')
+  #output_console(style='display:none')
+  #liveManifest(style='display:none') #{liveStreamManifest}  
+  #liveResponse(style='display:none') #{liveResponse}  
+  #rtmpEndpoint(style='display:none') #{rtmpEndpoint}
+  #useSandbox(style='display:none') #{useSandbox}  
+  #productionAvailable(style='display:none') #{productionAvailable}
+  #video_show()
+  
+	
+    
