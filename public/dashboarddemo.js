@@ -3,11 +3,20 @@ console.log(queryString);
 const urlParams = new URLSearchParams(queryString);
 const live = urlParams.get('live');
 console.log("live?",live);
+
+//live video settings
 var framerate = 10;
 var audioBitrate = 11025;
+var height = Math.max(240, urlParams.get('video_size'));
 var width = 240;
-var height = 240;
+if(height == 720){
+	width = 1280;
+}
+console.log("width x height", width + "x"+height);
+//this is the delay before the livestream appears on the page
+//look to reduce when we improve latency on live
 var livestreamTimeout = 15000;
+//flips to false when FFMPEG or the socket has an issue
 var livestreamOk = true;
 
 
@@ -23,15 +32,15 @@ if(live){
    
     
    
-      //onloadstuff
+    //onloadstuff
     window.onload = function(){
 		//dragand drop for live
 		dropVideo();
 		//style radio buttons
 		radioButton();
 		
-    //define the video player  and url 
-    //only start the live player X seconds after starting recording
+        //define the video player  and url 
+        //only start the live player X seconds after starting recording
         setTimeout(function (){
      
 			var liveManifest = document.getElementById("liveManifest").innerHTML;
@@ -67,24 +76,9 @@ if(live){
 
 }else{
 	
-	//not live
+	//not live, so just build the page
 	window.onload = function(){
-		//nable sandbox
 		
-		/*
-		//document.getElementById("sandboxDiv").className="sandboxActive";
-		//
-		console.log("productionAvailable",productionAvailable);
-		if(productionAvailable ==="false"){
-			//disable the prodction radio button
-			document.getElementById("production").disabled = "true";
-			document.getElementById("live_disclaimer").style.display = "none";
-			document.getElementsByClassName("production")[0].style.color = "gray";
-		}else{
-			
-			document.getElementById("productionDiv").className="productionActive";
-		}
-*/
 		radioButton();
    		dropVideo();
 	}
@@ -253,7 +247,10 @@ function uploadVideo(form){
 
 
  function initiateLivestream() {
-	 //set up livestream
+	//resize the video
+
+	
+	//set up livestream
 	 //warm up the camera
 	 connect_server();
 	
@@ -314,12 +311,14 @@ function show_output(str){
 		socket.on('connect_timeout', (timeout) => {
    			console.log("state on connection timeout= " +timeout);
 			output_message.innerHTML="Connection timed out";
+			document.getElementsByClassName("resultsWrapper")[0].innerHTML="Connection timed out";
 			//recordingCircle.style.fill='gray';
 			
 		});
 		socket.on('error', (error) => {
    			console.log("state on connection error= " +error);
 			output_message.innerHTML="Connection error";
+			document.getElementsByClassName("resultsWrapper")[0].innerHTML="Connection error";
 		//	recordingCircle.style.fill='gray';
 		});
 		
@@ -327,6 +326,7 @@ function show_output(str){
    			console.log("state on connection error= " +state);
 			console.log("Connection Failed");
 			output_message.innerHTML="Connection Failed";
+			document.getElementsByClassName("resultsWrapper")[0].innerHTML="Connection Failed";
 		//	recordingCircle.style.fill='gray';
 		});
 
@@ -340,6 +340,7 @@ function show_output(str){
 		socket.on('fatal',function(m){
 
 			output_message.innerHTML+=('Fatal ERROR: unexpected:'+m);
+			document.getElementsByClassName("resultsWrapper")[0].innerHTML="FFMPeg Crashed. Try starting the livestream again - maybe at lower bitrate.";
 			//alert('Error:'+m);
 			console.log("fatal socket error!!", m);
 			console.log("state on fatal error= " +state);
@@ -364,10 +365,12 @@ function show_output(str){
 			console.log("state disconec= " +state);
 			output_message.innerHTML+=('ERROR: server disconnected!');
 			console.log('ERROR: server disconnected!' +reason);
+			document.getElementsByClassName("resultsWrapper")[0].innerHTML="FFMPeg disconnected. Try starting the livestream again - maybe at lower bitrate.";
+			
 			
 			//error message to users
 			//document.getElementsByClassName("resultsWrapper")[0].innerHTML
-			document.getElementsByClassName("resultsWrapper")[0].innerHTML="This demo requires a steady internet connection with a fast upload rate. Please try again later.";
+			document.getElementsByClassName("resultsWrapper")[0].innerHTML="This demo requires a steady internet connection with a fast upload rate. Please try again later, or at a lower bitrate.";
 					
 	
 		});

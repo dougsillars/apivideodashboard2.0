@@ -1,52 +1,56 @@
+//apivideo
+const apiVideo = require('@api.video/nodejs-sdk');
+//file system - we need this to delete files after they are uploaded.
+var fs = require('fs');
+//env variables
 require('dotenv').config();
-const express = require('express');
-
+//formidable takes the form data and saves the file, and parameterises the fields into JSON
+const formidable = require('formidable');
+//postgressql for the projectID -> api key in the dashboard demo
+const pg = require('pg');
+//favicons are the cool little icon in the browser tab
+var favicon = require('serve-favicon');
+var bodyParser = require('body-parser')
 //express for the website and pug to create the pages
+const express = require('express');
 const app = express();
 const pug = require('pug');
 var server = require('http').createServer(app);
 var io = require('socket.io')(server);
-var rtmpEndpoint;
+//streaming stuff
+var spawn = require('child_process').spawn;
+
+//loggging
+const winston = require('winston');
+const Elasticsearch = require('winston-elasticsearch');
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.set('view engine','pug');
 app.use(express.static('public'));
-//favicons are the cool little icon in the browser tab
-var favicon = require('serve-favicon');
 app.use(favicon('public/icon.ico')); 
-//app.use(express.limit('2G'));
-var bodyParser = require('body-parser')
 app.use(bodyParser.json({limit: '2Gb'}));
 
-
+var rtmpEndpoint;
 var iframecode;
 var liveStreamManifest;
 //var iframecode = "img src='"+placeholderImage+"' width='100%'";
 
-//formidable takes the form data and saves the file, and parameterises the fields into JSON
-const formidable = require('formidable')
 
-//postgressql for the productID -> api key in the dashboard demo
-const pg = require('pg');
+
 const pool = new pg.Pool({
-	user: 'libcast',
-	host:'psql.api.video',
-	Schema:'public',
-	database:'subscription'
+	user: process.env.psqlUser,
+	host:process.env.psqlHost,
+	Schema:process.env.psqlSchema,
+	database:process.env.psqlDatabase
 });
 var myVideos = "https://go.api.video/user/change-env?env=sandbox";
-	
-	
-//file system - we need this to delete files after they are uploaded.
-var fs = require('fs');
-//apivideo
-const apiVideo = require('@api.video/nodejs-sdk');
 
 //apikeys
-var apiVideoSandbox=process.env.apivideoKeySandBox;
-var apiVideoProduction = process.env.apivideoKeyProd;
-var productIdSandbox = process.env.projectsand;
-var productIdProduction =  process.env.projectprod;
+var apiVideoSandbox= "";//process.env.apivideoKeySandBox;
+var apiVideoProduction = "";//process.env.apivideoKeyProd;
+var projectIdSandbox = "";//process.env.projectsand;
+var projectIdProduction =  "";//process.env.projectprod;
 
 var port ="3002";
 
@@ -57,6 +61,26 @@ var productionAvailable=false;
 //initially sandbox only
 var client = new apiVideo.Client({ apiKey: apiVideoSandbox});
 
+
+//set up logging
+var elkHost = process.env.elkendpoint;
+const esTransportOpts = {
+	level: 'info',
+	clientOpts: {
+		host: elkHost,
+		log:"info"
+	}
+  };
+ /* 
+  var logger = winston.createLogger({
+	level: 'info',
+	format: winston.format.json(),
+	transports: [
+	//  new winston.transports.File({ filename: "logfile.log", level: 'error' }), //save errors on file
+	  new Elasticsearch.ElasticsearchTransport(esTransportOpts) //everything info and above goes to elastic
+	]
+  });
+*/
 
 //testing
 app.get('/dashboarddesign',(req, res) => {
@@ -76,41 +100,32 @@ app.get('/', (req, res) => {
 	console.log("get index loaded", req.query);
 	var live = req.query.live;
 	
-	//get the productIDs and convert to API keys - only needed on get for first load
+	//get the projectIDs and convert to API keys - only needed on get for first load
 	//not present on subsequent loads...
 
 	//we only need to do this if there is a sandbox product ID GET param.  
 	//There is not a reason for there to be a prod but no sandbox.
 
-
-
 	if(req.query.sandbox){
-		//we got sandbox productID key!!
-		productIdSandbox = req.query.sandbox;
+		//we got sandbox projectID key!!
+		projectIdSandbox = req.query.sandbox;
 		useSandbox=true;
-		console.log("sandbox", productIdSandbox);
-
-		
+		console.log("sandbox", projectIdSandbox);
 	}
 	if(req.query.production){
-			//we got prod productID key
-			productIdProduction = req.query.production;
+			//we got prod projectID key
+			projectIdProduction = req.query.production;
 			productionAvailable = true;
 			//if prod is available - default is to stream and upload to prod
 			useSandbox=false;
-			console.log("productIdProduction", productIdProduction);
-
+			console.log("projectIdProduction", projectIdProduction);
 	}
-	
-	
-
-	
 	    //get sandbox key
 		const querySandbox = {
 			name: "get sandbox apikey",
-			text:"SELECT value from public.api_key where project_id =\'" +productIdSandbox+'\''
+			text:"SELECT value from public.api_key where project_id =\'" +projectIdSandbox+'\''
 		}
-		console.log(querySandbox.text);
+		//console.log(querySandbox.text);
 
 		pool.query(querySandbox, (err, res1) => {
 		//	console.log("re", res);
@@ -122,14 +137,14 @@ app.get('/', (req, res) => {
 		     //now get production key
 
 			//if no production ID = use the test one
-			if  (productIdProduction == ""){
-				productIdProduction = productIdSandbox;
+			if  (projectIdProduction == ""){
+				projectIdProduction = projectIdSandbox;
 
 			}
 
 			const queryProduction = {
 				name: "get production apikey",
-				text:"SELECT value from public.api_key where project_id =\'" +productIdProduction+'\''
+				text:"SELECT value from public.api_key where project_id =\'" +projectIdProduction+'\''
 			}
 			console.log(queryProduction.text);
 			pool.query(queryProduction, (err, res2) => {
@@ -142,14 +157,10 @@ app.get('/', (req, res) => {
 				//now I have both api keys... I can continue down the path I had before
 				//on subsequent loads - sandbox is chosen by the customer.
 				//use sandbox or prod
+				useSandbox = true;
 				if(req.query.livesandbox == "false"){
 					//use production
 					useSandbox = false;
-
-					console.log("production!!");
-				}else if(req.query.livesandbox == "true"){
-					useSandbox = true;
-					console.log("sandbox!!");
 				}
 				//now set the api client
 				if(useSandbox){
@@ -157,13 +168,7 @@ app.get('/', (req, res) => {
 				}else{
 					client = new apiVideo.Client({ apiKey: apiVideoProduction});
 				}
-				
 				console.log("use sandbox?", useSandbox);
-				console.log("client", client);
-				
-				
-				console.log("productionAvailable", productionAvailable);
-				//Just sandbox right now
 				
 				
 
@@ -171,9 +176,9 @@ app.get('/', (req, res) => {
 					//we have to add a livestream!
 					console.log("live!");
 					//live & socket stuff
-					var spawn = require('child_process').spawn;
-					const server = require('http').createServer(app);
-					var io = require('socket.io')(server);
+					//var spawn = require('child_process').spawn;
+					//const server = require('http').createServer(app);
+					//var io = require('socket.io')(server);
 					spawn('ffmpeg',['-h']).on('error',function(m){
 						console.error("FFMpeg not found in system cli; please install ffmpeg properly or make a softlink to ./!");
 						process.exit(-1);
@@ -195,11 +200,15 @@ app.get('/', (req, res) => {
 									console.log("creating new livestream", streams);
 									// run function to return stream
 									publishLiveStream(streams);
-								});
+								}).catch(function(error) {
+									console.error(error);
+									});
 							}
 
 				
-						});	
+						}).catch(function(error) {
+							console.error(error);
+							});	
 				
 						function publishLiveStream(streams){
 							console.log(streams);	
@@ -251,6 +260,10 @@ app.get('/', (req, res) => {
 
 
 
+//uploaded videos are sent via post to NOde - and then uploaded to api.video
+
+//when delegated upload tokens are queryble - we can move this to a delegated approach,a nd drop this entire post section
+
 
 //the form posts the data to the same location
 //so now we'll deal with the submitted data
@@ -278,85 +291,86 @@ app.post('/', (req,res) =>{
 		//Just sandbox right now
 
 		//use sandbox or prod
-	
-	
-	
-	
-	
 		console.log("fields ",fields); 
 		console.log("fields livesandbox",fields.vodsandbox);
+		//assume sandbox
+		useSandbox = true;
 		if(fields.vodsandbox == "false"){
 			//use production
 			useSandbox = false;
-		}else{
-			useSandbox = true;
 		}
 		console.log("use sandbox?", useSandbox);
 
-		//now set the api client
-		if(useSandbox){
-			client = new apiVideo.Client({ apiKey: apiVideoSandbox});
-			console.log("sandbox client");
-			//my videos url
-			myVideos = "https://go.api.video/user/change-env?env=sandbox";
-			
-		}else{
-			client = new apiVideo.Client({ apiKey: apiVideoProduction});
-			console.log("production client");
-			myVideos = "https://go.api.video/user/change-env?env=production";
-		}
+		var filePath = files.source.path;
 
 
-			var date = new Date();
-			var videoTitle = date.getTime();
-			//uploading.  Timers are for a TODO measuring upload & parsing time
-			startUploadTimer = Date.now();
-			console.log("start upload", startUploadTimer);
-			let result = client.videos.upload(files.source.path, {title: videoTitle});
-			
-			//the result is the upload response
-			//see https://docs.api.video/5.1/videos/create-video
-			//for JSON details
-			result.then(function(video) {
-				let player = video.assets.player;
-				uploadCompleteTimer = Date.now();
-				console.log("upload complete", uploadCompleteTimer);
-				//console.log("video",video);
-				var videoJson = JSON.stringify(video, null, 2);
-				//delete file on node server
-				fs.unlink(files.source.path, function (err) {
-				if (err) throw err;
-				// if no error, file has been deleted successfully
-				console.log('File deleted!');
-				}); 
-				//video is uploaded, but not yet published.	
-
-						//in the dashboard, wre dont actually care if it is published yet
-						//by the time they hit the link it should be ready
-						//pulling the check for playable since it fails in sandbox
-							console.log("ready to play the video");
-							playReadyTimer = Date.now();
-							let uploadSeconds = (uploadCompleteTimer-startUploadTimer)/1000;
-							let processSeconds = (playReadyTimer - uploadCompleteTimer)/1000;
-							console.log("video uploaded in: ", uploadSeconds);
-							console.log("video processed in: ", processSeconds);
-							//now we can get the MP4 url, and send the email and post the response
-							//now we add the tags to let zapier know it s ready to go
-							
-							var videoResponse = "Your video has been successfully uploaded, you can now manage it in <a href='"+myVideos+"' target='_blank'>my videos.</a>";
-							console.log("videoResponse", videoResponse);
-							
-						
-						return res.render('dashboardindex', {videoResponse, useSandbox, productionAvailable});
-								
+		//videoUpload(useSandbox, filepath);
+			//now set the api client
+	if(useSandbox){
+		client = new apiVideo.Client({ apiKey: apiVideoSandbox});
+		console.log("sandbox client");
+		//my videos url
+		myVideos = "https://go.api.video/user/change-env?env=sandbox";
 		
+	}else{
+		client = new apiVideo.Client({ apiKey: apiVideoProduction});
+		console.log("production client");
+		myVideos = "https://go.api.video/user/change-env?env=production";
+	}
+
+
+		var date = new Date();
+		var videoTitle = date.getTime();
+		//uploading.  Timers are for a TODO measuring upload & parsing time
+		startUploadTimer = Date.now();
+		console.log("start upload", startUploadTimer);
+		let result = client.videos.upload(filePath, {title: videoTitle});
+		
+		//the result is the upload response
+		//see https://docs.api.video/5.1/videos/create-video
+		//for JSON details
+		result.then(function(video) {
+			let player = video.assets.player;
+			uploadCompleteTimer = Date.now();
+			console.log("upload complete", uploadCompleteTimer);
+			//console.log("video",video);
+			var videoJson = JSON.stringify(video, null, 2);
+			//delete file on node server
+			fs.unlink(files.source.path, function (err) {
+			if (err) throw err;
+			// if no error, file has been deleted successfully
+			console.log('File deleted!');
+			}); 
+			//video is uploaded, but not yet published.	
+
+					//in the dashboard, wre dont actually care if it is published yet
+					//by the time they hit the link it should be ready
+					//pulling the check for playable since it fails in sandbox
+						console.log("ready to play the video");
+						playReadyTimer = Date.now();
+						let uploadSeconds = (uploadCompleteTimer-startUploadTimer)/1000;
+						let processSeconds = (playReadyTimer - uploadCompleteTimer)/1000;
+						console.log("video uploaded in: ", uploadSeconds);
+						console.log("video processed in: ", processSeconds);
+						//now we can get the MP4 url, and send the email and post the response
+						//now we add the tags to let zapier know it s ready to go
+						
+						var videoResponse = "Your video has been successfully uploaded, you can now manage it in <a href='"+myVideos+"' target='_blank'>my videos.</a>";
+						console.log("videoResponse", videoResponse);
+						
+					
+					return res.render('dashboardindex', {videoResponse, useSandbox, productionAvailable});
+							
 	
-			//if upload fails  
-			}).catch(function(error) {
-			console.error(error);
-			});
-			
-		//	console.log(result.response);
+
+		//if upload fails  
+		}).catch(function(error) {
+		console.error(error);
+		});
+		
+	//	console.log(result.response);
+
+		
 	});
 
 });
@@ -365,8 +379,7 @@ app.post('/', (req,res) =>{
 
 
 
-//streaming stuff
-var spawn = require('child_process').spawn;
+
 
 spawn('ffmpeg',['-h']).on('error',function(m){
 
@@ -537,6 +550,74 @@ function streamPicker(streams, counter){
 	
 }
 
+function videoUpload(useSandbox, filepath){
+	//now set the api client
+	if(useSandbox){
+		client = new apiVideo.Client({ apiKey: apiVideoSandbox});
+		console.log("sandbox client");
+		//my videos url
+		myVideos = "https://go.api.video/user/change-env?env=sandbox";
+		
+	}else{
+		client = new apiVideo.Client({ apiKey: apiVideoProduction});
+		console.log("production client");
+		myVideos = "https://go.api.video/user/change-env?env=production";
+	}
 
+
+		var date = new Date();
+		var videoTitle = date.getTime();
+		//uploading.  Timers are for a TODO measuring upload & parsing time
+		startUploadTimer = Date.now();
+		console.log("start upload", startUploadTimer);
+		let result = client.videos.upload(filePath, {title: videoTitle});
+		
+		//the result is the upload response
+		//see https://docs.api.video/5.1/videos/create-video
+		//for JSON details
+		result.then(function(video) {
+			let player = video.assets.player;
+			uploadCompleteTimer = Date.now();
+			console.log("upload complete", uploadCompleteTimer);
+			//console.log("video",video);
+			var videoJson = JSON.stringify(video, null, 2);
+			//delete file on node server
+			fs.unlink(files.source.path, function (err) {
+			if (err) throw err;
+			// if no error, file has been deleted successfully
+			console.log('File deleted!');
+			}); 
+			//video is uploaded, but not yet published.	
+
+					//in the dashboard, wre dont actually care if it is published yet
+					//by the time they hit the link it should be ready
+					//pulling the check for playable since it fails in sandbox
+						console.log("ready to play the video");
+						playReadyTimer = Date.now();
+						let uploadSeconds = (uploadCompleteTimer-startUploadTimer)/1000;
+						let processSeconds = (playReadyTimer - uploadCompleteTimer)/1000;
+						console.log("video uploaded in: ", uploadSeconds);
+						console.log("video processed in: ", processSeconds);
+						//now we can get the MP4 url, and send the email and post the response
+						//now we add the tags to let zapier know it s ready to go
+						
+						var videoResponse = "Your video has been successfully uploaded, you can now manage it in <a href='"+myVideos+"' target='_blank'>my videos.</a>";
+						console.log("videoResponse", videoResponse);
+						
+					
+					return res.render('dashboardindex', {videoResponse, useSandbox, productionAvailable});
+							
+	
+
+		//if upload fails  
+		}).catch(function(error) {
+		console.error(error);
+		});
+		
+	//	console.log(result.response);
+
+
+
+}
 
 

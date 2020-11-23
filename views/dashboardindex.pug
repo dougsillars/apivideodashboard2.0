@@ -41,8 +41,16 @@ body
           input(id='livesandbox',type='text', name = "livesandbox", value="true",style='display:none')
           span(style="font-size: 18px;") <b>Livestream</b><br/><br/>
           span(class='uploadFile__content__desc') Start live streaming from your webcam (Chrome and Firefox only). <br/><br/>
+          span(class="speed_list")
+            input(type="radio", name="video_size", value="240", checked) 
+            | 240x240 (requires 1MBPS uplink)
+            p
+            input(type="radio", name="video_size", value="720" )
+            | 1280x720 (requires 4 MBPS uplink)
+            p Build <a href='//stream.a.video')>your own</a> up to 4K!
+
           input(type="submit", class="liveButton" name="livestream", value ='Start' onclick='initiateLivestream();')
-        #live_disclaimer NOTE: Low fidelity 240x240 video. This is intended as a demo.
+        #live_disclaimer 
 
   #liveTest
   #Livestream
